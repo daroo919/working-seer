@@ -53,6 +53,18 @@ const client = new Client({
 const trials = new Map();
 
 // ======================
+// 채팅 로그 가져오기
+// ======================
+async function getRecentMessages(channel) {
+  const msgs = await channel.messages.fetch({ limit: 10 });
+
+  return msgs
+    .reverse()
+    .map(m => `${m.author.username}: ${m.content}`)
+    .join("\n");
+}
+
+// ======================
 // 명령어
 // ======================
 const commands = [
@@ -193,7 +205,7 @@ client.on("guildMemberAdd", member => {
 // ======================
 // AI 판결
 // ======================
-async function judge(defendant, reason, defense) {
+async function judge(defendant, reason, defense, context) {
   if (!AI_KEY) return "AI 키가 설정되지 않았다.";
 
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -208,14 +220,17 @@ async function judge(defendant, reason, defense) {
         {
           role: "system",
           content: `
-너는 냉정하고 논리적인 판사다.
+너는 전지적 시점의 냉혹한 판사다.
 히구루마 히로미처럼 말한다.
-감정 없이 책임 중심으로 판단한다.
+채팅 기록을 증거로 사용한다.
 `
         },
         {
           role: "user",
           content: `
+[채팅 기록]
+${context}
+
 피고: ${defendant}
 혐의: ${reason}
 변론: ${defense}
@@ -417,17 +432,38 @@ if (cmd === "재판") {
     max: 1
   });
 
+  // 말하면 즉시 판결
   collector.on("collect", async m => {
-    const result = await judge(defendant.username, reason, m.content);
+    const context = await getRecentMessages(interaction.channel);
+
+    const result = await judge(
+      defendant.username,
+      reason,
+      m.content,
+      context
+    );
+
     await interaction.followUp(`⚖️ 판결\n\n${result}`);
+
     collector.stop();
     trials.delete(id);
   });
 
+  // 안 하면 자동 판결
   collector.on("end", async c => {
     if (c.size === 0) {
-      const result = await judge(defendant.username, reason, "변론 없음");
+
+      const context = await getRecentMessages(interaction.channel);
+
+      const result = await judge(
+        defendant.username,
+        reason,
+        "변론 없음",
+        context
+      );
+
       await interaction.followUp(`⚖️ 판결\n\n${result}`);
+
       trials.delete(id);
     }
   });
